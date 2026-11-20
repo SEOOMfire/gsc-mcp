@@ -175,7 +175,7 @@ class SearchConsole:
         start_row: int = 0,
         page_cap: int = MAX_ROWS,
     ) -> tuple[list[dict], bool]:
-        """Fetch up to max_rows, paging until a short page or the cap."""
+        """Fetch up to max_rows. truncated is true only when another row exists past the cap."""
         if max_rows < 1 or max_rows > MAX_ROWS:
             raise ValueError(f"max_rows must be between 1 and {MAX_ROWS}")
         if start_row < 0:
@@ -183,12 +183,8 @@ class SearchConsole:
         if page_cap < 1 or page_cap > MAX_ROWS:
             raise ValueError(f"page_cap must be between 1 and {MAX_ROWS}")
         dims = list(dimensions or [])
-        collected: list[dict] = []
-        offset = start_row
-        remaining = max_rows
-        truncated = False
-        while remaining > 0:
-            page_size = min(page_cap, remaining)
+
+        async def fetch_page(row_limit: int, row_offset: int) -> list[dict]:
             body = analytics_body(
                 start_date=start_date,
                 end_date=end_date,
@@ -197,24 +193,34 @@ class SearchConsole:
                 search_type=search_type,
                 aggregation_type=aggregation_type,
                 data_state=data_state,
-                row_limit=page_size,
-                start_row=offset,
+                row_limit=row_limit,
+                start_row=row_offset,
             )
             payload = await self._request(
                 "POST",
                 f"{_SITES}/{site_path(site_url)}/searchAnalytics/query",
                 json_body=body,
             )
-            page = parse_analytics_rows(payload, dims)
+            return parse_analytics_rows(payload, dims)
+
+        collected: list[dict] = []
+        offset = start_row
+        remaining = max_rows
+        while remaining > 0:
+            page_size = min(page_cap, remaining)
+            page = await fetch_page(page_size, offset)
             collected.extend(page)
             if len(page) < page_size:
                 break
             remaining -= len(page)
             offset += len(page)
-            if remaining == 0:
-                truncated = True
-                break
-        return collected[:max_rows], truncated
+        if len(collected) > max_rows:
+            return collected[:max_rows], True
+        if len(collected) < max_rows:
+            return collected, False
+        # The cap was filled. One extra row tells us whether the API had more.
+        extra = await fetch_page(1, start_row + max_rows)
+        return collected[:max_rows], len(extra) > 0
 
     async def list_sitemaps(self, site_url: str, sitemap_index: str | None = None) -> list[dict]:
         params = {"sitemapIndex": sitemap_index} if sitemap_index else None

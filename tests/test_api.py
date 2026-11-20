@@ -134,13 +134,26 @@ def test_search_analytics_encodes_the_property_and_pages():
     assert "/searchAnalytics/query" in target
 
 
-def test_full_page_at_the_cap_is_truncated():
+def _dated_rows(count: int) -> list[dict]:
+    rows = []
+    for index in range(count):
+        day = 28 - index
+        rows.append(
+            {
+                "keys": [f"2026-11-{day:02d}"],
+                "clicks": 1,
+                "impressions": 10,
+                "ctr": 0.1,
+                "position": 4.2,
+            }
+        )
+    return rows
+
+
+def test_full_page_is_truncated_only_when_another_row_exists():
     def handler(request):
         body = json.loads(request.content)
-        rows = [
-            {"keys": ["a"], "clicks": 1, "impressions": 1, "ctr": 1, "position": 1},
-            {"keys": ["b"], "clicks": 1, "impressions": 1, "ctr": 1, "position": 1},
-        ]
+        rows = _dated_rows(3)
         start = body["startRow"]
         size = body["rowLimit"]
         return httpx2.Response(200, json={"rows": rows[start : start + size]})
@@ -151,7 +164,7 @@ def test_full_page_at_the_cap_is_truncated():
                 "sc-domain:example.com",
                 "2026-10-20",
                 "2026-11-16",
-                dimensions=["query"],
+                dimensions=["date"],
                 max_rows=2,
                 page_cap=2,
             )
@@ -161,6 +174,33 @@ def test_full_page_at_the_cap_is_truncated():
     rows, truncated = asyncio.run(run())
     assert len(rows) == 2
     assert truncated is True
+
+
+def test_exact_28_day_window_is_not_truncated():
+    """performance_overview asks for one row per day. 28 of 28 is complete."""
+
+    def handler(request):
+        body = json.loads(request.content)
+        rows = _dated_rows(28)
+        start = body["startRow"]
+        size = body["rowLimit"]
+        return httpx2.Response(200, json={"rows": rows[start : start + size]})
+
+    async def run():
+        async with _client(handler) as client:
+            return await client.search_analytics(
+                "sc-domain:example.com",
+                "2026-10-20",
+                "2026-11-16",
+                dimensions=["date"],
+                max_rows=28,
+            )
+
+    import asyncio
+
+    rows, truncated = asyncio.run(run())
+    assert len(rows) == 28
+    assert truncated is False
 
 
 def test_batch_inspect_stops_on_quota_and_rejects_a_long_list():
