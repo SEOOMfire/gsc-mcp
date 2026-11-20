@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gsc-mcp"
+version = "0.1.0"
+description = "Read-only MCP server for the Google Search Console API."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    # Same FastMCP release as the production Google Ads MCP.
+    # The allowlist reads private provider fields that can move between releases.
+    "fastmcp==4.1.8",
+    "google-auth>=2.36",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3"]
+
+[project.scripts]
+gsc-mcp = "gsc_mcp.server:run_server"
+
+[tool.setuptools.packages.find]
+include = ["gsc_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
